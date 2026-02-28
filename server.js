@@ -5,9 +5,9 @@ require("dotenv").config();
 
 const app = express();
 
-// UPDATED CORS: Pinapayagan ang lahat ng sources para hindi mag-error sa localhost
+// Mas matibay na CORS settings para payagan ang localhost at Render
 app.use(cors({
-  origin: "*", 
+  origin: "*",
   methods: ["GET", "POST"]
 }));
 
@@ -24,7 +24,7 @@ const db = mysql.createPool({
   connectionLimit: 10
 });
 
-// POST Route: Matches Railway table 'mood_entries' columns: user_name, mood_text
+// POST: Mag-save ng mood sa Railway
 app.post("/mood", async (req, res) => {
   const { full_name, mood_text } = req.body;
   if (!full_name || !mood_text) return res.status(400).json({ error: "Missing fields" });
@@ -36,6 +36,7 @@ app.post("/mood", async (req, res) => {
   ];
   const aiAdvice = responses[Math.floor(Math.random() * responses.length)];
 
+  // Ginagamit ang user_name at mood_text base sa Railway columns
   db.query(
     "INSERT INTO mood_entries (user_name, mood_text) VALUES (?, ?)",
     [full_name, mood_text],
@@ -46,8 +47,9 @@ app.post("/mood", async (req, res) => {
   );
 });
 
-// GET Route: Alias user_name AS full_name para sa frontend
+// GET: Kunin ang lahat ng moods mula sa Railway
 app.get("/mood", (req, res) => {
+  // Ginagamit ang created_At (malaking A) base sa iyong DB
   db.query("SELECT id, user_name AS full_name, mood_text, created_At FROM mood_entries ORDER BY created_At DESC", (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(results);
