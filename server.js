@@ -4,18 +4,27 @@ const mysql = require("mysql2");
 require("dotenv").config();
 
 const app = express();
-app.use(cors());
+
+// Apply CORS globally
+app.use(cors()); 
 app.use(express.json());
 
-// Connect to Railway MySQL using environment variables
+// Connect using the EXACT keys from your Render Environment screenshot
 const db = mysql.createPool({
-  host: process.env.MYSQL_HOST,
-  user: process.env.MYSQL_USER,
-  password: process.env.MYSQL_PASSWORD,
-  database: process.env.MYSQL_DATABASE
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT || 24780,
+  ssl: {
+    rejectUnauthorized: false // Required for Railway
+  },
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
 });
 
-// Test DB connection
+// Test DB connection with the pool
 db.getConnection((err, connection) => {
   if (err) {
     console.error("Database connection failed:", err);
@@ -36,7 +45,6 @@ app.post("/moods", (req, res) => {
     (err, result) => {
       if (err) return res.status(500).json({ error: err.message });
 
-      // Simple AI response logic
       const moodLower = mood.toLowerCase();
       let advice = "";
       if (moodLower.includes("sad")) advice = `${name}, it's okay to feel sad sometimes.`;
@@ -49,7 +57,6 @@ app.post("/moods", (req, res) => {
   );
 });
 
-// Optional GET /moods - list all moods
 app.get("/moods", (req, res) => {
   db.query("SELECT * FROM moods ORDER BY created_at DESC", (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -57,5 +64,6 @@ app.get("/moods", (req, res) => {
   });
 });
 
-const PORT = process.env.PORT || 5000;
+// Render provides the PORT automatically
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
