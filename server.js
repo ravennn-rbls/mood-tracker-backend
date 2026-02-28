@@ -4,67 +4,64 @@ const mysql = require("mysql2");
 require("dotenv").config();
 
 const app = express();
-
-// Middleware
-app.use(cors()); 
+app.use(cors());
 app.use(express.json());
 
-// Database Connection using Environment Variables
+// 1. Setup Environment Variables
+const GROQ_API_KEY = process.env.GROQ_API_KEY; 
+
+// 2. Database Connection for Railway
 const db = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  port: process.env.DB_PORT || 3306,
+  port: process.env.DB_PORT || 24780, 
   ssl: { 
-    rejectUnauthorized: false // Required for Railway/External connections
+    rejectUnauthorized: false 
   },
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
 });
 
-// Test DB connection
+// 3. Auto-Create Table on Startup
+const initDB = () => {
+  const createTableQuery = `
+    CREATE TABLE IF NOT EXISTS moods (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        full_name VARCHAR(255) NOT NULL,
+        mood_text TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `;
+  
+  db.query(createTableQuery, (err) => {
+    if (err) {
+      console.error("❌ Table creation failed:", err.message);
+    } else {
+      console.log("✅ Database table is ready (created or already exists).");
+    }
+  });
+};
+
+// Database Connection Test
 db.getConnection((err, connection) => {
   if (err) {
-    console.error("Database connection failed:", err.message);
+    console.error("❌ DATABASE ERROR:", err.code);
   } else {
-    console.log("Database connected successfully ✅");
+    console.log("✅ Successfully connected to Railway DB!");
     connection.release();
+    initDB(); // Run table creation after connection
   }
 });
 
-// POST /mood - For submitting the form (Matches your Vue: api.post('/mood'))
-app.post("/mood", (req, res) => {
-  const { full_name, mood_text } = req.body;
-  
-  if (!full_name || !mood_text) {
-    return res.status(400).json({ error: "Missing fields" });
-  }
-
-  db.query(
-    "INSERT INTO moods (full_name, mood_text) VALUES (?, ?)",
-    [full_name, mood_text],
-    (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
-
-      let advice = `Thanks for sharing, ${full_name}!`;
-      const lowerMood = mood_text.toLowerCase();
-      
-      // Basic AI logic
-      if (lowerMood.includes("sad")) {
-        advice = "I'm sorry you're feeling sad. Take a deep breath.";
-      } else if (lowerMood.includes("happy")) {
-        advice = "That's great! Keep that positive energy going!";
-      }
-      
-      // Send response back (Matches your Vue: res.data.ai_message)
-      res.json({ ai_message: advice });
-    }
-  );
+// 4. Health Check Route
+app.get("/", (req, res) => {
+  res.send("<h1>✅ Backend is Online!</h1><p>Try the /mood route to see data.</p>");
 });
 
-// GET /mood - For fetching history (Matches your Vue: api.get('/mood'))
+// 5. GET Moods
 app.get("/mood", (req, res) => {
   db.query("SELECT * FROM moods ORDER BY created_at DESC", (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -72,6 +69,54 @@ app.get("/mood", (req, res) => {
   });
 });
 
-// Render provides the PORT automatically
+// 6. POST New Mood
+app.post("/mood", async (req, res) => {
+  const { full_name, mood_text } = req.body;
+  if (!full_name || !mood_text) return res.status(400).json({ error: "Missing fields" });
+
+  let aiAdvice = "";
+
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${GROQ_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "llama-3.1-8b-instant",
+        messages: [
+          { role: "system", content: "You are a supportive mental health companion. Give a short, calming message." },
+          { role: "user", content: `I am ${full_name} and I feel ${mood_text}` }
+        ]
+      })
+    });
+
+    const data = await response.json();
+    aiAdvice = data.choices?.[0]?.message?.content || "Keep going, you're doing great.";
+
+  } catch (error) {
+    console.warn("Groq failed or key missing, using fallback.");
+    const fallbacks = [
+      "Take a deep breath. You are doing better than you think.",
+      "It's okay to rest. You don't have to solve everything today.",
+      "Small steps still move you forward."
+    ];
+    aiAdvice = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+  }
+
+  db.query(
+    "INSERT INTO moods (full_name, mood_text) VALUES (?, ?)",
+    [full_name, mood_text],
+    (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ai_message: aiAdvice }); 
+    }
+  );
+});
+
+// 7. Start Server
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
+});
